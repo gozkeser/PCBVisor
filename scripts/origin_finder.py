@@ -30,7 +30,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 AUTHOR = "G.OZKESER"
-VERSION = "1.10"
+VERSION = "1.11"
 LAST_UPDATE_DATE = "12.07.2026"
 
 # Mapping from filename substrings to layer names.
@@ -74,6 +74,7 @@ def parse_real_fiducials(csv_path: Path, target_layer: str) -> list[dict]:
 
     Handles:
     - Byte Order Mark (BOM) in files
+    - Various legacy multi-byte local system encodings (e.g. UTF-8, CP1252, CP1254 Turkish, Latin-1)
     - Leading garbage lines before the main header row
     - Case-insensitive variable column ordering
     - 'mm' suffix units in coordinates
@@ -82,9 +83,21 @@ def parse_real_fiducials(csv_path: Path, target_layer: str) -> list[dict]:
     if not csv_path.is_file():
         raise FileNotFoundError(f"CSV file not found: {csv_path}")
 
-    # Read lines using 'utf-8-sig' to strip the BOM if present
-    with open(csv_path, "r", encoding="utf-8-sig") as f:
-        lines = f.readlines()
+    # Try standard and local encodings sequentially to handle diverse OS output encodings gracefully
+    encodings = ["utf-8-sig", "cp1252", "cp1254", "latin-1"]
+    lines = None
+    for enc in encodings:
+        try:
+            with open(csv_path, "r", encoding=enc) as f:
+                lines = f.readlines()
+            break
+        except UnicodeDecodeError:
+            continue
+
+    if lines is None:
+        # Fall back to UTF-8 with character replacement to guarantee the script never crashes
+        with open(csv_path, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
 
     # Locate the header row containing standard expected identifiers
     header_idx = None
