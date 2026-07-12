@@ -54,7 +54,7 @@ COLUMN_LAYER = "Layer"
 COLUMN_CENTER_X = "Center-X(mm)"
 COLUMN_CENTER_Y = "Center-Y(mm)"
 
-FD_PREFIX_PATTERN = re.compile(r"^FD", re.IGNORECASE)
+FD_PREFIX_PATTERN = re.compile(r"^(FD|FID)", re.IGNORECASE)
 
 
 def detect_layer_from_filename(filepath: Path) -> Optional[str]:
