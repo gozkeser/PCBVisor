@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 """
 Fiducial Display Utility
-Loads a PNG image, maps real-world fiducial coordinates using a transformation matrix
-from the origin JSON file, and draws annotated markers for the origin and fiducials.
+Loads a PNG image, maps real-world fiducial coordinates directly from the
+JSON file (utilizing matrix, origin, and pre-matched fiducials), and draws
+annotated markers for the origin and fiducials.
 
 Usage:
-    python fid_display.py -i 00000000_D01_BOT.png -c 00000000_D01_Fiducials.csv -j 00000000_D01_BOT_fiducial_candidates_origin.json
+    python fid_display.py -i 3D_TOP_expanded.png -j 3D_TOP_expanded_fiducial_candidates_origin.json
 """
 
 import argparse
-import csv
 import json
-import re
 import sys
 from pathlib import Path
 from typing import Optional
@@ -20,20 +19,23 @@ import cv2
 import numpy as np
 
 AUTHOR = "G.OZKESER"
-VERSION = "1.01"
+VERSION = "1.03"
 LAST_UPDATE_DATE = "12.07.2026"
 
 # =================================================================
 # MARKER & DISPLAY CONFIGURATION (PARAMETRIC)
 # =================================================================
-# Real-world fiducial radius in mm to calculate pixel radius R dynamically:
-# R = scale (px/mm) * REAL_FIDUCIAL_RADIUS_MM
+# Real-world fiducial radius in mm to calculate pixel radius R dynamically if needed:
 REAL_FIDUCIAL_RADIUS_MM = 0.5  
+
+# Prevent overlay markers from touching or obscuring the physical pad image
+# This offset is added directly to the detected fiducial radius
+FIDUCIAL_RADIUS_OFFSET_PX = 10   # px
 
 # Styling for fiducials (BGRA format to support transparency overlays)
 LINE_THICKNESS = 3              # px
 COLOR_FIDUCIAL = (0, 255, 0, 255) # Green, fully opaque
-MARKER_SIZE_MULTIPLIER = 4.0    # Scale factor for shape size (e.g. 2R, 3R)
+MARKER_SIZE_MULTIPLIER = 3.0    # Scale factor for shape size (e.g. 2R, 3R)
 
 # Shape style: 'circle', 'concentric', 'reticle', 'target'
 MARKER_SHAPE = 'reticle'
@@ -57,13 +59,6 @@ FILENAME_LAYER_MAP: dict[str, str] = {
     "TOP": "TopLayer",
 }
 
-COLUMN_DESIGNATOR = "Designator"
-COLUMN_LAYER = "Layer"
-COLUMN_CENTER_X = "Center-X(mm)"
-COLUMN_CENTER_Y = "Center-Y(mm)"
-
-FD_PREFIX_PATTERN = re.compile(r"^FD", re.IGNORECASE)
-
 
 def detect_layer_from_filename(filepath: Path) -> Optional[str]:
     """Infer layer (BottomLayer/TopLayer) from filename substring."""
@@ -72,93 +67,6 @@ def detect_layer_from_filename(filepath: Path) -> Optional[str]:
         if key in stem_upper:
             return layer
     return None
-
-
-def parse_real_fiducials(csv_path: Path, target_layer: str) -> list[dict]:
-    """Parse real fiducials CSV matching the given layer."""
-    if not csv_path.is_file():
-        raise FileNotFoundError(f"CSV file not found: {csv_path}")
-
-    # Read and sanitize raw lines
-    with open(csv_path, "r", encoding="utf-8-sig") as f:
-        lines = f.readlines()
-
-    header_idx = None
-    header_columns = None
-    
-    # Iterate to find the header row by checking for mandatory columns
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if not stripped:
-            continue
-        reader = csv.reader([stripped])
-        try:
-            row = next(reader)
-        except StopIteration:
-            continue
-        row_stripped = [cell.strip().strip('"') for cell in row]
-        expected_headers = {COLUMN_DESIGNATOR, COLUMN_LAYER, COLUMN_CENTER_X, COLUMN_CENTER_Y}
-        if expected_headers.issubset(set(row_stripped)):
-            header_idx = i
-            header_columns = row_stripped
-            break
-
-    if header_idx is None:
-        raise ValueError("Could not find header row in CSV file.")
-
-    # Map column names to their exact column indices
-    col_index: dict[str, int] = {}
-    for col_name in [COLUMN_DESIGNATOR, COLUMN_LAYER, COLUMN_CENTER_X, COLUMN_CENTER_Y]:
-        if col_name in header_columns:
-            col_index[col_name] = header_columns.index(col_name)
-        else:
-            for j, hcol in enumerate(header_columns):
-                if hcol.lower() == col_name.lower():
-                    col_index[col_name] = j
-                    break
-
-    fiducials = []
-    data_lines = lines[header_idx + 1:]
-    
-    # Process individual rows to parse coordinates
-    for line in data_lines:
-        stripped = line.strip()
-        if not stripped:
-            continue
-        reader = csv.reader([stripped])
-        try:
-            row = next(reader)
-        except StopIteration:
-            continue
-        row_stripped = [cell.strip().strip('"') for cell in row]
-
-        if len(row_stripped) <= max(col_index.values()):
-            continue
-
-        designator = row_stripped[col_index[COLUMN_DESIGNATOR]]
-        layer = row_stripped[col_index[COLUMN_LAYER]]
-        raw_x = row_stripped[col_index[COLUMN_CENTER_X]]
-        raw_y = row_stripped[col_index[COLUMN_CENTER_Y]]
-
-        # Filter row according to the target layer and prefix check
-        if layer.strip() != target_layer:
-            continue
-        if not FD_PREFIX_PATTERN.match(designator.strip()):
-            continue
-
-        try:
-            x_mm = float(raw_x.replace("mm", "").strip())
-            y_mm = float(raw_y.replace("mm", "").strip())
-        except ValueError:
-            continue
-
-        fiducials.append({
-            "designator": designator.strip(),
-            "x_mm": x_mm,
-            "y_mm": y_mm,
-        })
-
-    return fiducials
 
 
 def draw_fiducial_marker(img: np.ndarray, center: tuple[int, int], R: float):
@@ -229,54 +137,56 @@ def main():
 
     parser = argparse.ArgumentParser(description="Draws fiducials and origin on PNG image.")
     parser.add_argument("-i", "--image", required=True, help="Input PNG image path")
-    parser.add_argument("-c", "--csv", required=True, help="Input real fiducials CSV path")
-    parser.add_argument("-j", "--json", required=True, help="Input origin JSON path")
+    parser.add_argument("-j", "--json", required=True, help="Input JSON file containing matrix and fiducials")
     parser.add_argument("-l", "--layer", help="Target layer (auto-detected if omitted)")
     parser.add_argument("-o", "--output", help="Output annotated PNG path")
 
     args = parser.parse_args()
 
     image_path = Path(args.image)
-    csv_path = Path(args.csv)
     json_path = Path(args.json)
 
-    # 1. Detect target layer
+    # 1. Load transformation matrix, origin, and fiducials from JSON file
+    print(f"[*] Loading data from: {json_path.name}")
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            json_data = json.load(f)
+        M = np.array(json_data["transformation_matrix"], dtype=np.float64)
+        origin_px = json_data["origin_pixel"]
+        matched_fiducials = json_data.get("matched_fiducials", [])
+    except Exception as e:
+        print(f"[ERROR] Failed parsing JSON file: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # 2. Detect target layer from JSON or filename
     target_layer = args.layer
     if not target_layer:
-        target_layer = detect_layer_from_filename(image_path)
+        # Check if layer is specified in JSON
+        json_layer = json_data.get("layer")
+        if json_layer:
+            # Map shorthand to standard layer names
+            if json_layer.upper() == "TOP":
+                target_layer = "TopLayer"
+            elif json_layer.upper() in ["BOTTOM", "BOT"]:
+                target_layer = "BottomLayer"
+            else:
+                target_layer = json_layer
+        
+        # Fallback to filename deduction
+        if not target_layer:
+            target_layer = detect_layer_from_filename(image_path)
         if not target_layer:
             target_layer = detect_layer_from_filename(json_path)
         if not target_layer:
             target_layer = "BottomLayer"  # Fallback default
     print(f"[*] Target Layer: {target_layer}")
-
-    # 2. Parse real coordinates from CSV
-    print(f"[*] Parsing real coordinates from: {csv_path.name}")
-    try:
-        real_fids = parse_real_fiducials(csv_path, target_layer)
-    except Exception as e:
-        print(f"[ERROR] Failed parsing fiducials CSV: {e}", file=sys.stderr)
-        sys.exit(1)
-    print(f"    Found {len(real_fids)} real fiducial(s)")
-
-    # 3. Load transformation matrix and origin coordinates from JSON file
-    print(f"[*] Loading transformation matrix from: {json_path.name}")
-    try:
-        with open(json_path, "r", encoding="utf-8") as f:
-            origin_data = json.load(f)
-        M = np.array(origin_data["transformation_matrix"], dtype=np.float64)
-        origin_px = origin_data["origin_pixel"]
-    except Exception as e:
-        print(f"[ERROR] Failed parsing JSON file: {e}", file=sys.stderr)
-        sys.exit(1)
+    print(f"    Found {len(matched_fiducials)} matched fiducial(s) in JSON")
 
     # Calculate scale factor S (px/mm) from transformation matrix components
     scale = float(np.sqrt(M[0, 0]**2 + M[1, 0]**2))
-    R_px = scale * REAL_FIDUCIAL_RADIUS_MM
     print(f"    Detected scale: {scale:.4f} px/mm")
-    print(f"    Fiducial radius R: {R_px:.2f} px (real: {REAL_FIDUCIAL_RADIUS_MM} mm)")
 
-    # 4. Load input PNG image (ensuring original alpha is preserved if present)
+    # 3. Load input PNG image (ensuring original alpha is preserved if present)
     print(f"[*] Loading image: {image_path.name}")
     try:
         img_raw = cv2.imread(str(image_path), cv2.IMREAD_UNCHANGED)
@@ -285,7 +195,7 @@ def main():
         sys.exit(1)
 
     if img_raw is None:
-        print(f"[ERROR] Could not load image (unsupported format or file missing): {image_path}", file=sys.stderr)
+        print(f"[ERROR] Could not load image: {image_path}", file=sys.stderr)
         sys.exit(1)
         
     # Enforce consistent 4-channel BGRA processing space
@@ -302,7 +212,7 @@ def main():
     h_img, w_img = img.shape[:2]
     print(f"    Resolution: {w_img} x {h_img} px")
 
-    # 5. Check and expand boundary if origin lies slightly out of bounds
+    # 4. Check and expand boundary if origin lies slightly out of bounds
     orig_x, orig_y = int(round(origin_px["x"])), int(round(origin_px["y"]))
 
     pad_top = 0
@@ -346,28 +256,49 @@ def main():
     else:
         print(f"[WARNING] Origin ({orig_x}, {orig_y}) lies outside image boundaries!")
 
-    # 6. Map and draw real-world coordinate fiducials
-    print(f"[*] Mapping and drawing fiducials...")
-    for rf in real_fids:
-        # Convert mm coordinates using affine matrix M
-        x_mm, y_mm = rf["x_mm"], rf["y_mm"]
-        x_px = M[0, 0] * x_mm + M[0, 1] * y_mm + M[0, 2]
-        y_px = M[1, 0] * x_mm + M[1, 1] * y_mm + M[1, 2]
-        cx, cy = int(round(x_px)), int(round(y_px))
+    # 5. Draw real-world coordinate fiducials directly parsed from JSON
+    print(f"[*] Drawing fiducials...")
+    for rf in matched_fiducials:
+        designator = rf.get("designator", "FD")
+        
+        # Original pixel coordinates relative to the unpadded image
+        raw_x_px = rf["x_px"]
+        raw_y_px = rf["y_px"]
+        
+        # Apply padding offset
+        cx = int(round(raw_x_px)) + pad_left
+        cy = int(round(raw_y_px)) + pad_top
 
-        # Re-offset points based on padding
-        cx += pad_left
-        cy += pad_top
+        # Extract radius and apply parametric offset to avoid overlapping the pad image
+        base_radius = rf.get("radius_px", scale * REAL_FIDUCIAL_RADIUS_MM)
+        R_px = base_radius + FIDUCIAL_RADIUS_OFFSET_PX
 
         # Check bounds in updated frame and draw annotations
         if 0 <= cx < w_img and 0 <= cy < h_img:
             draw_fiducial_marker(img, (cx, cy), R_px)
             
-            # Construct and render texts
+            # Construct and render labels
             label_text = ""
             if SHOW_LABELS:
-                label_text += rf["designator"]
+                label_text += designator
+                
             if SHOW_COORDINATES:
+                # Reconstruct real-world millimeter coordinates using inverse transform
+                # Solve linear equation system: A * X = B
+                A = np.array([
+                    [M[0, 0], M[0, 1]],
+                    [M[1, 0], M[1, 1]]
+                ], dtype=np.float64)
+                B = np.array([
+                    raw_x_px - M[0, 2],
+                    raw_y_px - M[1, 2]
+                ], dtype=np.float64)
+                
+                try:
+                    x_mm, y_mm = np.linalg.solve(A, B)
+                except np.linalg.LinAlgError:
+                    x_mm, y_mm = 0.0, 0.0
+                    
                 if label_text:
                     label_text += " "
                 label_text += f"({x_mm:.1f},{y_mm:.1f})"
@@ -375,11 +306,11 @@ def main():
             if label_text:
                 cv2.putText(img, label_text, (cx + 5, cy - 15), TEXT_FONT, TEXT_SCALE, COLOR_TEXT, TEXT_THICKNESS)
                 
-            print(f"    Fiducial {rf['designator']} mapped to ({cx}, {cy}) px")
+            print(f"    Fiducial {designator} drawn at ({cx}, {cy}) px with radius {R_px:.2f} px")
         else:
-            print(f"    [!] {rf['designator']} mapped to ({cx}, {cy}) px - outside boundaries")
+            print(f"    [!] {designator} at ({cx}, {cy}) px - outside boundaries")
 
-    # 7. Save finalized annotated BGRA image
+    # 6. Save finalized annotated BGRA image
     output_path = args.output
     if not output_path:
         output_path = image_path.parent / f"{image_path.stem}_marked.png"
