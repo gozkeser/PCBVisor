@@ -1,0 +1,10 @@
+Output: TPR
+Type  : Test Points
+From  : Variant [[No Variations]] of PCB Document [PCB1.PcbDoc]
+   Generated File[TPR.csv]
+
+
+Files Generated   : 1
+Documents Printed : 0
+
+Finished Output Generation At 22:42:58 On 12/07/2026

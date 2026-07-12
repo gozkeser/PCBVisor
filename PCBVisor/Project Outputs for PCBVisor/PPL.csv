@@ -1,0 +1,25 @@
+Altium Designer Pick and Place Locations
+C:\Users\Public\Documents\Altium\PCBVisor\Project Outputs for PCBVisor\PCBVisor\PPL.csv
+
+========================================================================================================================
+File Design Information:
+
+Date:       12/07/26
+Time:       22:42
+Revision:   Not in VersionControl
+Variant:    No variations
+Units used: mm
+
+"Designator","Comment","Layer","Footprint","Center-X(mm)","Center-Y(mm)","Rotation","Description"
+"FD1","Global Fiducial Mark","TopLayer","FIDUCIAL_0.8MM","5.0000","47.5000","0",""
+"FD2","Global Fiducial Mark","TopLayer","FIDUCIAL_0.8MM","10.0000","7.5000","0",""
+"FD3","Global Fiducial Mark","TopLayer","FIDUCIAL_0.8MM","85.5000","5.0000","0",""
+"FD4","Global Fiducial Mark","TopLayer","FIDUCIAL_0.8MM","89.5000","55.0000","0",""
+"FID1","Global Fiducial Mark","BottomLayer","FIDUCIAL_0.8MM","92.5000","47.5000","90",""
+"FID2","Global Fiducial Mark","BottomLayer","FIDUCIAL_0.8MM","10.5000","52.5000","90",""
+"FID3","Global Fiducial Mark","BottomLayer","FIDUCIAL_0.8MM","5.0000","13.0000","90",""
+"FID4","Global Fiducial Mark","BottomLayer","FIDUCIAL_0.8MM","92.5000","12.5000","90",""
+"LED1","LEDCHIP","TopLayer","CHIP-LED0603","13.7501","25.0000","270","SMD lamp beads"
+"P1","Header 2","TopLayer","JST-PH-2PIN-2.54-THM","8.9000","26.4200","90","Header, 2-Pin"
+"R1","RESISTOR","TopLayer","R0603","14.0000","28.6500","270","Resistor ?K ±0.1% 0.1W"
+"U1","ATMEGA328P-PU","TopLayer","TQFP32-08","38.5000","16.5000","0",""
