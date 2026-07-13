@@ -20,6 +20,8 @@ AUTHOR = "G.OZKESER"
 VERSION = "1.00"
 LAST_UPDATE_DATE = "13.07.2026"
 
+OUTPUT_SUFFIX = "_E"
+
 # Configure structured logging for production-level feedback
 logging.basicConfig(
     level=logging.INFO,
@@ -86,22 +88,22 @@ def parse_arguments() -> AppConfig:
         "-p",
         "--padding",
         type=int,
-        default=100,
-        help="Padding to add in pixels to all outer directions (default: 100).",
+        default=125,
+        help="Padding to add in pixels to all outer directions (default: %(default)s).",
     )
     parser.add_argument(
         "-c",
         "--color",
         type=parse_color,
         default="254,254,254",
-        help="RGB color to convert to transparent, formatted as R,G,B (default: 254,254,254).",
+        help="RGB color to convert to transparent, formatted as R,G,B (default: %(default)s).",
     )
     parser.add_argument(
         "-o",
         "--output",
         type=str,
         default=None,
-        help="Path to the output PNG file (default: [input_filename]_E.png).",
+        help="Path to the output PNG file (default: [input_filename]{OUTPUT_SUFFIX}.png).",
     )
 
     args = parser.parse_args()
@@ -109,8 +111,7 @@ def parse_arguments() -> AppConfig:
 
     # Automatically derive the output path if it was not provided
     if args.output is None:
-        output_path = input_path.with_name(
-            f"{input_path.stem}_E{input_path.suffix}"
+        output_path = str(input_path.with_stem(f"{input_path.stem}{OUTPUT_SUFFIX}"))
         )
     else:
         output_path = Path(args.output)
