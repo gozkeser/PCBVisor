@@ -16,6 +16,10 @@ from typing import Tuple
 import cv2
 import numpy as np
 
+AUTHOR = "G.OZKESER"
+VERSION = "1.00"
+LAST_UPDATE_DATE = "13.07.2026"
+
 # Configure structured logging for production-level feedback
 logging.basicConfig(
     level=logging.INFO,
@@ -97,7 +101,7 @@ def parse_arguments() -> AppConfig:
         "--output",
         type=str,
         default=None,
-        help="Path to the output PNG file (default: [input_filename]_expanded.png).",
+        help="Path to the output PNG file (default: [input_filename]_E.png).",
     )
 
     args = parser.parse_args()
@@ -106,7 +110,7 @@ def parse_arguments() -> AppConfig:
     # Automatically derive the output path if it was not provided
     if args.output is None:
         output_path = input_path.with_name(
-            f"{input_path.stem}_expanded{input_path.suffix}"
+            f"{input_path.stem}_E{input_path.suffix}"
         )
     else:
         output_path = Path(args.output)

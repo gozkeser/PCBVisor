@@ -21,16 +21,13 @@ import numpy as np
 import re
 
 AUTHOR = "G.OZKESER"
-VERSION = "1.01"
-LAST_UPDATE_DATE = "08.07.2026"
+VERSION = "1.02"
+LAST_UPDATE_DATE = "13.07.2026"
 
-YELLOW = "\033[93m"
-CYAN = "\033[96m"
-RED = "\033[91m"
-GREEN = "\033[92m"
-BOLD_WHITE = "\033[1;37m"
-COLOR_RESET = "\033[0m"
-
+COLOR_GREEN = (0, 255, 0, 255)
+COLOR_RED = (0, 0, 255, 255)
+COLOR_BLUE = (255, 0, 0, 255)
+COLOR_YELLOW = (0, 255, 255, 255)
 
 class DualLogger:
     """Redirects stdout stream to write to both the terminal screen and a log file simultaneously."""
@@ -57,7 +54,7 @@ class CircleDetector:
     """Handles image loading, preprocessing, single-pass circle detection, and output generation."""
 
     # Proximity tolerance for filtering close circles (pixels)
-    PROXIMITY_TOLERANCE = 60
+    PROXIMITY_TOLERANCE = 64 # ~2.7mm to filter 2.54mm pitch connector pins
 
     def __init__(self, input_path: Path, output_dir: Path,
                  canny_threshold: float, min_circularity: float,
@@ -87,7 +84,7 @@ class CircleDetector:
         if not self.input_path.is_file():
             raise FileNotFoundError(f"Input file not found at: {self.input_path}")
 
-        image: Optional[np.ndarray] = cv2.imread(str(self.input_path))
+        image: Optional[np.ndarray] = cv2.imread(str(self.input_path), cv2.IMREAD_UNCHANGED)
         if image is None:
             raise ValueError(f"Failed to decode or read image: {self.input_path}")
 
@@ -100,17 +97,20 @@ class CircleDetector:
         Returns the binary edge image for contour detection.
         """
         # Step 2: Convert to Grayscale
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        if len(image.shape) == 3 and image.shape[2] == 4:
+            gray = cv2.cvtColor(image, cv2.COLOR_BGRA2GRAY)
+        else:
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
         if self.debug:
-            self._write_image(gray, self._debug_path(2))
+            self._write_image(gray, self._debug_path(2), original_image=image)
             print(f"[DEBUG] Step 2 - Grayscale image saved to: {self._debug_path(2)}")
 
         # Step 3: Noise Reduction (using a 5x5 Median Blur kernel)
         blurred = cv2.medianBlur(gray, 5)
 
         if self.debug:
-            self._write_image(blurred, self._debug_path(3))
+            self._write_image(blurred, self._debug_path(3), original_image=image)
             print(f"[DEBUG] Step 3 - Blurred image saved to: {self._debug_path(3)}")
 
         # Step 4: Edge Detection (using Canny Edge Detection)
@@ -118,7 +118,7 @@ class CircleDetector:
         edges = cv2.Canny(blurred, self.canny_threshold / 2, self.canny_threshold)
 
         if self.debug:
-            self._write_image(edges, self._debug_path(4))
+            self._write_image(edges, self._debug_path(4), original_image=image)
             print(f"[DEBUG] Step 4 - Edge detection (Canny) image saved to: {self._debug_path(4)}")
 
         return edges
@@ -156,7 +156,7 @@ class CircleDetector:
 
                 # Filter based on radius constraints
                 if self.min_radius <= radius <= self.max_radius:
-                    detected.append((float(x), float(y), float(radius)))
+                    detected.append((float(x), float(y), float(radius), float(area)))
                     detected_info.append((area, perimeter, circularity))
 
         if detected:
@@ -165,15 +165,59 @@ class CircleDetector:
                 print(f"\n[DEBUG] Detected Circles Summary:")
                 print(f"{'ID':<6} {'Center X':<14} {'Center Y':<14} {'Radius':<10} {'Area':<14} {'Perimeter':<14} {'Circularity':<14}")
                 print("-" * 90)
-                for d_idx, (cx, cy, cr) in enumerate(detected):
+                for d_idx, (cx, cy, cr, carea) in enumerate(detected):
                     area_val, perim_val, circ_val = detected_info[d_idx]
                     print(f"{d_idx:<6} {cx:<14.3f} {cy:<14.3f} {cr:<10.3f} {area_val:<14.3f} {perim_val:<14.3f} {circ_val:<14.4f}")
                 print("-" * 90)
+
+            # Step 5: Raw contours/circles detected before deduplication
+            if self.debug:
+                debug_img_pre = original_image.copy()
+                for d_idx, (cx, cy, cr, carea) in enumerate(detected):
+                    cx, cy, cr = int(round(cx)), int(round(cy)), int(round(cr))
+                    cv2.circle(debug_img_pre, (cx, cy), cr, COLOR_GREEN, 2)
+                    cv2.circle(debug_img_pre, (cx, cy), 2, COLOR_RED, -1)
+                self._write_image(debug_img_pre, self._debug_path(5))
+                print(f"[DEBUG] Step 5 - Pre-deduplication visualization saved to: {self._debug_path(5)}")
 
             # Deduplicate close detections
             print(f"[*] Removing duplicate circles...")
             self.detected_circles = self._deduplicate(detected)
             print(f"[*] Unique fiducial candidates after deduplication: {len(self.detected_circles)}")
+
+            # Step 6: Circles after deduplication (removing very close similar radius circles)
+            if self.debug:
+                debug_img_post = original_image.copy()
+                for circle in self.detected_circles:
+                    cx, cy, cr = int(round(circle[0])), int(round(circle[1])), int(round(circle[2]))
+                    cv2.circle(debug_img_post, (cx, cy), cr, COLOR_GREEN, 2)
+                    cv2.circle(debug_img_post, (cx, cy), 2, COLOR_RED, -1)
+                self._write_image(debug_img_post, self._debug_path(6))
+                print(f"[DEBUG] Step 6 - Post-deduplication visualization saved to: {self._debug_path(6)}")
+
+            # minEnclosingCircle check
+            print(f"[*] Filtering by minEnclosingCircle area ratio...")
+            before_min_enclosing = len(self.detected_circles)
+            self.detected_circles = self._filter_by_min_enclosing_circle(self.detected_circles, original_image)
+            after_min_enclosing = len(self.detected_circles)
+            print(f"[*] Fiducial candidates after minEnclosingCircle check: {after_min_enclosing} (removed {before_min_enclosing - after_min_enclosing})")
+
+            # Pick inner circle
+            print(f"[*] Picking inner circles...")
+            before_inner = len(self.detected_circles)
+            self.detected_circles = self._pick_inner_circle(self.detected_circles)
+            after_inner = len(self.detected_circles)
+            print(f"[*] Fiducial candidates after inner circle pick: {after_inner} (removed {before_inner - after_inner})")
+
+            # Step 8: Circles after picking inner circles (smaller radius) for overlaps
+            if self.debug:
+                debug_img_inner = original_image.copy()
+                for circle in self.detected_circles:
+                    cx, cy, cr = int(round(circle[0])), int(round(circle[1])), int(round(circle[2]))
+                    cv2.circle(debug_img_inner, (cx, cy), cr, COLOR_GREEN, 2)
+                    cv2.circle(debug_img_inner, (cx, cy), 2, COLOR_RED, -1)
+                self._write_image(debug_img_inner, self._debug_path(8))
+                print(f"[DEBUG] Step 8 - Post-pick inner circle visualization saved to: {self._debug_path(8)}")
 
             # Filter close coordinates
             print(f"[*] Filtering close coordinates...")
@@ -186,14 +230,15 @@ class CircleDetector:
             print("[-] No circles found matching the current parameters.")
 
         # Save debug visualization if enabled
+        # Step 9: Final circles after coordinate proximity filtering (close coordinates)
         if self.debug and self.detected_circles:
             debug_img = original_image.copy()
             for circle in self.detected_circles:
                 cx, cy, cr = int(round(circle[0])), int(round(circle[1])), int(round(circle[2]))
-                cv2.circle(debug_img, (cx, cy), cr, (0, 255, 0), 2)
-                cv2.circle(debug_img, (cx, cy), 2, (0, 0, 255), -1)
-            self._write_image(debug_img, self._debug_path(5))
-            print(f"[DEBUG] Step 5 - Detection visualization saved to: {self._debug_path(5)}")
+                cv2.circle(debug_img, (cx, cy), cr, COLOR_GREEN, 2)
+                cv2.circle(debug_img, (cx, cy), 2, COLOR_RED, -1)
+            self._write_image(debug_img, self._debug_path(9))
+            print(f"[DEBUG] Step 9 - Final detection visualization saved to: {self._debug_path(9)}")
 
         return self.detected_circles
 
@@ -203,15 +248,61 @@ class CircleDetector:
         """
         unique = []
         for circle in circles:
-            x, y, r = circle
+            x, y, r, area = circle
             is_duplicate = False
-            for ux, uy, ur in unique:
+            for u_circle in unique:
+                ux, uy, ur, uarea = u_circle
                 distance = np.sqrt((x - ux) ** 2 + (y - uy) ** 2)
                 rad_diff = abs(r - ur)
                 if distance < spatial_tolerance and rad_diff < radius_tolerance:
                     is_duplicate = True
                     break
             if not is_duplicate:
+                unique.append(circle)
+        return unique
+
+    def _filter_by_min_enclosing_circle(self, circles: list, original_image: np.ndarray) -> list:
+        """
+        Filters out circles where the contour area is significantly smaller than
+        the area of the minimum enclosing circle.
+        """
+        area_ratio = 0.8
+        filtered = []
+        for circle in circles:
+            x, y, r, area = circle
+            enclosing_area = np.pi * (r ** 2)
+            if enclosing_area > 0 and (area / enclosing_area) >= area_ratio:
+                filtered.append(circle)
+        
+        # Step 7: Circles after minEnclosingCircle area ratio check
+        if self.debug:
+            debug_img = original_image.copy()
+            for circle in filtered:
+                cx, cy, cr = int(round(circle[0])), int(round(circle[1])), int(round(circle[2]))
+                cv2.circle(debug_img, (cx, cy), cr, COLOR_GREEN, 2)
+                cv2.circle(debug_img, (cx, cy), 2, COLOR_RED, -1)
+            self._write_image(debug_img, self._debug_path(7))
+            print(f"[DEBUG] Step 7 - minEnclosingCircle visualization saved to: {self._debug_path(7)}")
+
+        return filtered
+
+    def _pick_inner_circle(self, circles: list, spatial_tolerance: float = 3.0) -> list:
+        """
+        Deduplicates close detections by keeping the circle with the smaller radius.
+        """
+        unique = []
+        for circle in circles:
+            x, y, r, area = circle
+            replaced = False
+            for i, u_circle in enumerate(unique):
+                ux, uy, ur, uarea = u_circle
+                distance = np.sqrt((x - ux) ** 2 + (y - uy) ** 2)
+                if distance < spatial_tolerance:
+                    if r < ur:
+                        unique[i] = circle
+                    replaced = True
+                    break
+            if not replaced:
                 unique.append(circle)
         return unique
 
@@ -224,14 +315,14 @@ class CircleDetector:
         to_filter = [False] * len(circles)
         for i in range(len(circles)):
             for j in range(i + 1, len(circles)):
-                x1, y1, r1 = circles[i]
-                x2, y2, r2 = circles[j]
+                x1, y1, r1, area1 = circles[i]
+                x2, y2, r2, area2 = circles[j]
                 # Same y, close x
-                if abs(y1 - y2) < 1.0 and abs(x1 - x2) < self.PROXIMITY_TOLERANCE:
+                if abs(y1 - y2) < 5.0 and abs(x1 - x2) < self.PROXIMITY_TOLERANCE:
                     to_filter[i] = True
                     to_filter[j] = True
                 # Same x, close y
-                if abs(x1 - x2) < 1.0 and abs(y1 - y2) < self.PROXIMITY_TOLERANCE:
+                if abs(x1 - x2) < 5.0 and abs(y1 - y2) < self.PROXIMITY_TOLERANCE:
                     to_filter[i] = True
                     to_filter[j] = True
         return [c for i, c in enumerate(circles) if not to_filter[i]]
@@ -241,7 +332,8 @@ class CircleDetector:
         Exports the detected circles as fiducial candidates to a JSON file.
         """
         fiducials_data = []
-        for idx, (x, y, r) in enumerate(self.detected_circles, start=1):
+        for idx, circle in enumerate(self.detected_circles, start=1):
+            x, y, r = circle[0], circle[1], circle[2]
             fiducials_data.append({
                 "fid_candidate_id": idx,
                 "center_x": float(round(x, 3)),
@@ -278,15 +370,16 @@ class CircleDetector:
         print(f"{'Candidate ID':<14} {'Center':<20} {'Radius (px)':<12}")
         print("-" * 60)
 
-        for idx, (x, y, r) in enumerate(self.detected_circles, start=1):
+        for idx, circle in enumerate(self.detected_circles, start=1):
+            x, y, r = circle[0], circle[1], circle[2]
             coords = f"({int(round(x))}, {int(round(y))})"
             print(f"{idx:<14} {coords:<20} {int(round(r)):<12}")
 
             # Draw circle boundary (green)
-            cv2.circle(image, (int(round(x)), int(round(y))), int(round(r)), (0, 255, 0), 2)
+            cv2.circle(image, (int(round(x)), int(round(y))), int(round(r)), COLOR_GREEN, 2)
 
             # Draw center point (red)
-            cv2.circle(image, (int(round(x)), int(round(y))), 2, (0, 0, 255), -1)
+            cv2.circle(image, (int(round(x)), int(round(y))), 2, COLOR_RED, -1)
 
             # Draw ID label (blue)
             text_str = f"ID: {idx}"
@@ -297,7 +390,7 @@ class CircleDetector:
                 org=text_org,
                 fontFace=cv2.FONT_HERSHEY_SIMPLEX,
                 fontScale=0.5,
-                color=(255, 0, 0),
+                color=COLOR_BLUE,
                 thickness=1,
                 lineType=cv2.LINE_AA
             )
@@ -306,12 +399,23 @@ class CircleDetector:
         self._write_image(image, output_path)
         return total
 
-    def _write_image(self, image: np.ndarray, path: Path) -> None:
+    def _write_image(self, image: np.ndarray, path: Path, original_image: Optional[np.ndarray] = None) -> None:
         """
         Saves the image matrix to the specified filepath.
+        If original_image is provided and has an alpha channel, it applies it to the output.
         """
+        out_image = image
+        if original_image is not None and len(original_image.shape) == 3 and original_image.shape[2] == 4:
+            alpha = original_image[:, :, 3]
+            if len(image.shape) == 2:
+                out_image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGRA)
+                out_image[:, :, 3] = alpha
+            elif len(image.shape) == 3 and image.shape[2] == 3:
+                out_image = cv2.cvtColor(image, cv2.COLOR_BGR2BGRA)
+                out_image[:, :, 3] = alpha
+
         path.parent.mkdir(parents=True, exist_ok=True)
-        success = cv2.imwrite(str(path), image)
+        success = cv2.imwrite(str(path), out_image)
         if not success:
             raise OSError(f"Could not write image to target path: {path}")
 
@@ -404,7 +508,7 @@ def main() -> None:
 
         # Print active detection parameters immediately
         print("=" * 65)
-        print(f"    {YELLOW}Fiducial Finder{COLOR_RESET} Version: {YELLOW}{VERSION}{COLOR_RESET} Last updated on {YELLOW}{LAST_UPDATE_DATE}{COLOR_RESET}")
+        print(f"    Fiducial Finder Version: {VERSION} Last updated on {LAST_UPDATE_DATE}")
         print("=" * 65)
         print("Circle Detector Pipeline - Active Configuration Parameters")
         print("=" * 65)
