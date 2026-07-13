@@ -313,7 +313,7 @@ def main():
     # 6. Save finalized annotated BGRA image
     output_path = args.output
     if not output_path:
-        output_path = image_path.parent / f"{image_path.stem}_marked.png"
+        output_path = image_path.parent / f"{image_path.stem}_final.png"
     else:
         output_path = Path(output_path)
 
