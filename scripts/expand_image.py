@@ -103,7 +103,7 @@ def parse_arguments() -> AppConfig:
         "--output",
         type=str,
         default=None,
-        help="Path to the output PNG file (default: [input_filename]{OUTPUT_SUFFIX}.png).",
+        help=f"Path to the output PNG file (default: [input_filename]{OUTPUT_SUFFIX}.png).",
     )
 
     args = parser.parse_args()
@@ -111,8 +111,7 @@ def parse_arguments() -> AppConfig:
 
     # Automatically derive the output path if it was not provided
     if args.output is None:
-        output_path = str(input_path.with_stem(f"{input_path.stem}{OUTPUT_SUFFIX}"))
-        )
+        output_path = input_path.with_stem(f"{input_path.stem}{OUTPUT_SUFFIX}")
     else:
         output_path = Path(args.output)
 
