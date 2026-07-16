@@ -306,8 +306,8 @@ def filter_candidates_by_distance_ratio(
     real_diag = float(np.linalg.norm(real_max - real_min))
     scale_est = px_diag / max(1e-5, real_diag)
     
-    min_scale = 0.85 * scale_est
-    max_scale = 1.15 * scale_est
+    min_scale = 0.75 * scale_est
+    max_scale = 1.25 * scale_est
 
     best_rmse = float("inf")
     best_matching_indices: Optional[list[int]] = None
