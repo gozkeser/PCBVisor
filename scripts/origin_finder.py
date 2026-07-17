@@ -245,7 +245,7 @@ def _compute_distance_matrix(points: NDArray[np.float32]) -> NDArray[np.float32]
 def filter_candidates_by_distance_ratio(
     pixel_candidates: list[dict],
     real_fiducials: list[dict],
-    tolerance: float = 0.01
+    tolerance: float = 1.0
 ) -> list[dict]:
     """
     Filters M candidates down to N best geometry matches using distance ratio.
