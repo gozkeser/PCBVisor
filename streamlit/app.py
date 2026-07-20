@@ -35,31 +35,6 @@ html, body, [class*="css"] {
     font-family: 'Inter', sans-serif;
 }
 
-/* Header gradient bar */
-.pcbvisor-header {
-    background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
-    border-radius: 12px;
-    padding: 18px 28px;
-    margin-bottom: 18px;
-    display: flex;
-    align-items: center;
-    gap: 14px;
-}
-.pcbvisor-header h1 {
-    margin: 0;
-    font-size: 2rem;
-    font-weight: 700;
-    background: linear-gradient(90deg, #00d4ff, #7b2ff7);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    letter-spacing: 2px;
-}
-.pcbvisor-header p {
-    margin: 2px 0 0 0;
-    font-size: 0.82rem;
-    color: #8a9bab;
-}
-
 /* Step progress rows */
 .step-row {
     display: flex;
@@ -117,18 +92,12 @@ html, body, [class*="css"] {
 .log-warning { color: #f0c040; }
 .log-error   { color: #ff6b6b; }
 .log-debug   { color: #6b7fa3; }
+
+/* Only hide the Deploy button, keep everything else */
+[data-testid="stDeployButton"] {
+    display: none !important;
+}
 </style>
-""", unsafe_allow_html=True)
-
-# ─── Header ──────────────────────────────────────────────────────────────────
-
-st.markdown("""
-<div class="pcbvisor-header">
-    <div>
-        <h1>🔬 PCBVisor</h1>
-        <p>PCB Fiducial Detection &amp; World Origin Pipeline</p>
-    </div>
-</div>
 """, unsafe_allow_html=True)
 
 # ─── Session State Init ───────────────────────────────────────────────────────
@@ -139,10 +108,31 @@ if "last_hash" not in st.session_state:
     st.session_state.last_hash = None
 if "selected_step_id" not in st.session_state:
     st.session_state.selected_step_id = None
+if "last_png_name" not in st.session_state:
+    st.session_state.last_png_name = None
+if "last_csv_name" not in st.session_state:
+    st.session_state.last_csv_name = None
 
 # ─── Sidebar ─────────────────────────────────────────────────────────────────
 
 with st.sidebar:
+    st.markdown("""
+<div style="
+    background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
+    border-radius: 8px;
+    padding: 8px 12px;
+    margin-bottom: 12px;
+    text-align: center;
+">
+    <span style="font-size: 1.5rem; font-weight: 700;
+         background: linear-gradient(90deg, #00d4ff, #7b2ff7);
+         -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+         letter-spacing: 1px;">🔬 PCBVisor</span>
+    <div style="font-size: 1rem; color: #8a9bab; margin-top: 1px;">
+        PCB Fiducial Detection Pipeline
+    </div>
+</div>
+""", unsafe_allow_html=True)
     st.markdown('<div class="section-title">📁 Inputs</div>', unsafe_allow_html=True)
     png_file = st.file_uploader("PCB Image (.png)", type=["png"], key="png_upload")
     csv_file = st.file_uploader("Fiducial CSV (PPL)", type=["csv"], key="csv_upload")
@@ -202,6 +192,15 @@ with st.sidebar:
     with col_run:
         run_clicked = st.button("▶ Run", use_container_width=True, type="primary")
 
+# ─── Detect File Changes ──────────────────────────────────────────────────────
+
+# If a new PNG or CSV file was uploaded, reset the pipeline state so the
+# preview is shown instead of stale results.
+if png_file is not None and png_file.name != st.session_state.last_png_name:
+    st.session_state.pipeline_state = None
+if csv_file is not None and csv_file.name != st.session_state.last_csv_name:
+    st.session_state.pipeline_state = None
+
 # ─── Build Params ─────────────────────────────────────────────────────────────
 
 params = PipelineParams(
@@ -236,7 +235,11 @@ should_run = run_clicked or (
     autorun
     and png_file is not None
     and csv_file is not None
-    and current_hash != st.session_state.last_hash
+    and (
+        current_hash != st.session_state.last_hash
+        or png_file.name != st.session_state.last_png_name
+        or csv_file.name != st.session_state.last_csv_name
+    )
 )
 
 if should_run and png_file and csv_file:
@@ -251,6 +254,8 @@ if should_run and png_file and csv_file:
         )
     st.session_state.pipeline_state = state
     st.session_state.last_hash = current_hash
+    st.session_state.last_png_name = png_file.name
+    st.session_state.last_csv_name = csv_file.name
 
     # Default step to display = last step with image
     steps_with_img = state.steps_with_images()
@@ -463,6 +468,179 @@ window.addEventListener('resize', () => resetView());
 """
                 st.components.v1.html(canvas_html, height=700, scrolling=False)
 
+    elif png_file is not None:
+        # Show raw uploaded PNG as preview
+        file_bytes = np.frombuffer(png_file.getvalue(), np.uint8)
+        raw_img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+        if raw_img is not None:
+            # Convert to BGRA for display (same as pipeline viewer)
+            img_bgra = cv2.cvtColor(raw_img, cv2.COLOR_BGR2BGRA)
+            success, buf = cv2.imencode(".png", img_bgra)
+            if success:
+                b64 = base64.b64encode(buf.tobytes()).decode("utf-8")
+                img_h, img_w = img_bgra.shape[:2]
+
+                canvas_html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body {{
+    margin: 0;
+    padding: 0;
+    background: #0e1117;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }}
+  #controls {{
+    width: 100%;
+    padding: 6px 14px;
+    background: #1a1f2e;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: #6b9fcf;
+    box-sizing: border-box;
+  }}
+  #zoom-label {{ color: #4ecdc4; font-weight: 600; min-width: 55px; }}
+  #zoom-slider {{ flex: 1; accent-color: #00d4ff; }}
+  #reset-btn {{
+    background: #2d3a4f;
+    color: #c8d6e0;
+    border: none;
+    padding: 4px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: inherit;
+  }}
+  #reset-btn:hover {{ background: #3a4a60; }}
+  canvas {{
+    cursor: grab;
+    display: block;
+  }}
+  canvas:active {{ cursor: grabbing; }}
+</style>
+</head>
+<body>
+<div id="controls">
+  <span>Zoom:</span>
+  <input id="zoom-slider" type="range" min="10" max="800" value="100" step="5">
+  <span id="zoom-label">100%</span>
+  <button id="reset-btn" onclick="resetView()">Fit</button>
+  <span style="margin-left:auto;color:#3d5068;">Scroll=zoom · Drag=pan · DblClick=fit</span>
+</div>
+<canvas id="c"></canvas>
+
+<script>
+const IMG_W = {img_w};
+const IMG_H = {img_h};
+const src = "data:image/png;base64,{b64}";
+
+const img = new Image();
+img.src = src;
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const slider = document.getElementById('zoom-slider');
+const zLabel = document.getElementById('zoom-label');
+
+let scale = 1.0;
+let ox = 0, oy = 0;
+let dragging = false;
+let lastX = 0, lastY = 0;
+
+function getCanvasSize() {{
+  const avail = window.innerWidth;
+  const h = 650;
+  return [avail, h];
+}}
+
+function fitScale() {{
+  const [cw, ch] = getCanvasSize();
+  return Math.min(cw / IMG_W, ch / IMG_H, 1.0);
+}}
+
+function resetView() {{
+  const [cw, ch] = getCanvasSize();
+  scale = fitScale();
+  ox = (cw - IMG_W * scale) / 2;
+  oy = (ch - IMG_H * scale) / 2;
+  slider.value = Math.round(scale * 100);
+  zLabel.textContent = Math.round(scale * 100) + '%';
+  draw();
+}}
+
+function draw() {{
+  const [cw, ch] = getCanvasSize();
+  canvas.width = cw;
+  canvas.height = ch;
+  ctx.clearRect(0, 0, cw, ch);
+  ctx.fillStyle = '#0e1117';
+  ctx.fillRect(0, 0, cw, ch);
+  ctx.drawImage(img, ox, oy, IMG_W * scale, IMG_H * scale);
+}}
+
+img.onload = () => resetView();
+
+canvas.addEventListener('wheel', (e) => {{
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  const delta = e.deltaY < 0 ? 1.1 : 0.9;
+  const newScale = Math.min(8.0, Math.max(0.1, scale * delta));
+
+  ox = mx - (mx - ox) * (newScale / scale);
+  oy = my - (my - oy) * (newScale / scale);
+  scale = newScale;
+
+  slider.value = Math.round(scale * 100);
+  zLabel.textContent = Math.round(scale * 100) + '%';
+  draw();
+}}, {{ passive: false }});
+
+canvas.addEventListener('mousedown', (e) => {{
+  dragging = true;
+  lastX = e.clientX;
+  lastY = e.clientY;
+}});
+window.addEventListener('mousemove', (e) => {{
+  if (!dragging) return;
+  ox += e.clientX - lastX;
+  oy += e.clientY - lastY;
+  lastX = e.clientX;
+  lastY = e.clientY;
+  draw();
+}});
+window.addEventListener('mouseup', () => dragging = false);
+
+canvas.addEventListener('dblclick', () => resetView());
+
+slider.addEventListener('input', () => {{
+  const [cw, ch] = getCanvasSize();
+  const newScale = parseInt(slider.value) / 100;
+  ox = cw / 2 - (cw / 2 - ox) * (newScale / scale);
+  oy = ch / 2 - (ch / 2 - oy) * (newScale / scale);
+  scale = newScale;
+  zLabel.textContent = Math.round(scale * 100) + '%';
+  draw();
+}});
+
+window.addEventListener('resize', () => resetView());
+</script>
+</body>
+</html>
+"""
+                st.info("📄 Preview — Upload CSV file and click ▶ Run to process the image.")
+                st.components.v1.html(canvas_html, height=700, scrolling=False)
+        else:
+            st.error("Could not decode uploaded PNG file.")
     else:
         st.markdown(
             '<div style="height:450px;display:flex;align-items:center;justify-content:center;'
