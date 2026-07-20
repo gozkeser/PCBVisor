@@ -128,8 +128,8 @@ with st.sidebar:
          background: linear-gradient(90deg, #00d4ff, #7b2ff7);
          -webkit-background-clip: text; -webkit-text-fill-color: transparent;
          letter-spacing: 1px;">🔬 PCBVisor</span>
-    <div style="font-size: 1rem; color: #8a9bab; margin-top: 1px;">
-        PCB Fiducial Detection Pipeline
+    <div style="font-size: 0.9rem; color: #8a9bab; margin-top: 1px;">
+        PCB Fiducial Detection Pipeline v1.00
     </div>
 </div>
 """, unsafe_allow_html=True)
