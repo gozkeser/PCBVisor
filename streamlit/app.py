@@ -128,7 +128,7 @@ with st.sidebar:
          background: linear-gradient(90deg, #00d4ff, #7b2ff7);
          -webkit-background-clip: text; -webkit-text-fill-color: transparent;
          letter-spacing: 1px;">🔬 PCBVisor</span>
-    <div style="font-size: 0.9rem; color: #8a9bab; margin-top: 1px;">
+    <div style="font-size: 0.9rem; color: #FFFFFF; margin-top: 1px;">
         PCB Fiducial Detection Pipeline v1.00
     </div>
 </div>
@@ -136,6 +136,7 @@ with st.sidebar:
     st.markdown('<div class="section-title">📁 Inputs</div>', unsafe_allow_html=True)
     png_file = st.file_uploader("PCB Image (.png)", type=["png"], key="png_upload")
     csv_file = st.file_uploader("Fiducial CSV (PPL)", type=["csv"], key="csv_upload")
+    run_top_clicked = st.button("▶ Run", use_container_width=True, type="primary", key="run_top")
 
     st.markdown('<div class="section-title">⚙ Image Expansion</div>', unsafe_allow_html=True)
     padding = st.slider("Padding (px)", 0, 300, 125, 5, key="padding")
@@ -190,7 +191,7 @@ with st.sidebar:
     with col_auto:
         autorun = st.toggle("🔄 Autorun", value=False, key="autorun")
     with col_run:
-        run_clicked = st.button("▶ Run", use_container_width=True, type="primary")
+        run_bottom_clicked = st.button("▶ Run", use_container_width=True, type="primary", key="run_bottom")
 
 # ─── Detect File Changes ──────────────────────────────────────────────────────
 
@@ -231,7 +232,7 @@ current_hash = params.hash()
 
 # ─── Pipeline Execution ────────────────────────────────────────────────────────
 
-should_run = run_clicked or (
+should_run = (run_top_clicked or run_bottom_clicked) or (
     autorun
     and png_file is not None
     and csv_file is not None
@@ -264,6 +265,211 @@ if should_run and png_file and csv_file:
 
 elif should_run and (not png_file or not csv_file):
     st.warning("⚠ Please upload both a PNG image and a CSV file before running.")
+
+def render_canvas_html(img_w: int, img_h: int, b64: str) -> str:
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body {{
+    margin: 0;
+    padding: 0;
+    background: #0e1117;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }}
+  #controls {{
+    width: 100%;
+    padding: 6px 14px;
+    background: #1a1f2e;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: #6b9fcf;
+    box-sizing: border-box;
+  }}
+  #zoom-label {{ color: #4ecdc4; font-weight: 600; min-width: 55px; }}
+  #zoom-slider {{ flex: 1; accent-color: #00d4ff; }}
+  .ctrl-btn {{
+    background: #2d3a4f;
+    color: #c8d6e0;
+    border: none;
+    padding: 4px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: inherit;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    transition: background 0.15s;
+  }}
+  .ctrl-btn:hover {{ background: #3a4a60; }}
+  canvas {{
+    cursor: grab;
+    display: block;
+  }}
+  canvas:active {{ cursor: grabbing; }}
+</style>
+</head>
+<body>
+<div id="controls">
+  <span>Zoom:</span>
+  <input id="zoom-slider" type="range" min="10" max="800" value="100" step="5">
+  <span id="zoom-label">100%</span>
+  <button id="reset-btn" class="ctrl-btn" onclick="resetView()">Fit</button>
+  <button id="fullscreen-btn" class="ctrl-btn" onclick="toggleFullscreen()">⛶ Fullscreen</button>
+  <span style="margin-left:auto;color:#3d5068;">Scroll=zoom · Drag=pan · DblClick=fit</span>
+</div>
+<canvas id="c"></canvas>
+
+<script>
+const IMG_W = {img_w};
+const IMG_H = {img_h};
+const src = "data:image/png;base64,{b64}";
+
+const img = new Image();
+img.src = src;
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const slider = document.getElementById('zoom-slider');
+const zLabel = document.getElementById('zoom-label');
+const fsBtn = document.getElementById('fullscreen-btn');
+
+let scale = 1.0;
+let ox = 0, oy = 0;
+let dragging = false;
+let lastX = 0, lastY = 0;
+
+function isFullscreen() {{
+  return !!(document.fullscreenElement || document.webkitFullscreenElement);
+}}
+
+function toggleFullscreen() {{
+  if (!isFullscreen()) {{
+    const el = document.documentElement;
+    if (el.requestFullscreen) {{
+      el.requestFullscreen();
+    }} else if (el.webkitRequestFullscreen) {{
+      el.webkitRequestFullscreen();
+    }}
+  }} else {{
+    if (document.exitFullscreen) {{
+      document.exitFullscreen();
+    }} else if (document.webkitExitFullscreen) {{
+      document.webkitExitFullscreen();
+    }}
+  }}
+}}
+
+function updateFullscreenBtn() {{
+  if (isFullscreen()) {{
+    fsBtn.innerHTML = '🗗 Exit Fullscreen';
+    fsBtn.style.background = '#00d4ff';
+    fsBtn.style.color = '#0e1117';
+  }} else {{
+    fsBtn.innerHTML = '⛶ Fullscreen';
+    fsBtn.style.background = '#2d3a4f';
+    fsBtn.style.color = '#c8d6e0';
+  }}
+}}
+
+['fullscreenchange', 'webkitfullscreenchange'].forEach(evt => {{
+  document.addEventListener(evt, () => {{
+    updateFullscreenBtn();
+    resetView();
+  }});
+}});
+
+function getCanvasSize() {{
+  const avail = window.innerWidth;
+  const ctrlH = document.getElementById('controls') ? document.getElementById('controls').offsetHeight : 35;
+  const h = isFullscreen() ? (window.innerHeight - ctrlH) : 650;
+  return [avail, h];
+}}
+
+function fitScale() {{
+  const [cw, ch] = getCanvasSize();
+  return Math.min(cw / IMG_W, ch / IMG_H, 1.0);
+}}
+
+function resetView() {{
+  const [cw, ch] = getCanvasSize();
+  scale = fitScale();
+  ox = (cw - IMG_W * scale) / 2;
+  oy = (ch - IMG_H * scale) / 2;
+  slider.value = Math.round(scale * 100);
+  zLabel.textContent = Math.round(scale * 100) + '%';
+  draw();
+}}
+
+function draw() {{
+  const [cw, ch] = getCanvasSize();
+  canvas.width = cw;
+  canvas.height = ch;
+  ctx.clearRect(0, 0, cw, ch);
+  ctx.fillStyle = '#0e1117';
+  ctx.fillRect(0, 0, cw, ch);
+  ctx.drawImage(img, ox, oy, IMG_W * scale, IMG_H * scale);
+}}
+
+img.onload = () => resetView();
+
+canvas.addEventListener('wheel', (e) => {{
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  const delta = e.deltaY < 0 ? 1.1 : 0.9;
+  const newScale = Math.min(8.0, Math.max(0.1, scale * delta));
+
+  ox = mx - (mx - ox) * (newScale / scale);
+  oy = my - (my - oy) * (newScale / scale);
+  scale = newScale;
+
+  slider.value = Math.round(scale * 100);
+  zLabel.textContent = Math.round(scale * 100) + '%';
+  draw();
+}}, {{ passive: false }});
+
+canvas.addEventListener('mousedown', (e) => {{
+  dragging = true;
+  lastX = e.clientX;
+  lastY = e.clientY;
+}});
+window.addEventListener('mousemove', (e) => {{
+  if (!dragging) return;
+  ox += e.clientX - lastX;
+  oy += e.clientY - lastY;
+  lastX = e.clientX;
+  lastY = e.clientY;
+  draw();
+}});
+window.addEventListener('mouseup', () => dragging = false);
+
+canvas.addEventListener('dblclick', () => resetView());
+
+slider.addEventListener('input', () => {{
+  const [cw, ch] = getCanvasSize();
+  const newScale = parseInt(slider.value) / 100;
+  ox = cw / 2 - (cw / 2 - ox) * (newScale / scale);
+  oy = ch / 2 - (ch / 2 - oy) * (newScale / scale);
+  scale = newScale;
+  zLabel.textContent = Math.round(scale * 100) + '%';
+  draw();
+}});
+
+window.addEventListener('resize', () => resetView());
+</script>
+</body>
+</html>
+"""
 
 # ─── Main Panel ────────────────────────────────────────────────────────────────
 
@@ -308,164 +514,7 @@ with tab1:
             if success:
                 b64 = base64.b64encode(buf.tobytes()).decode("utf-8")
                 img_h, img_w = img_to_encode.shape[:2]
-
-                canvas_html = f"""
-<!DOCTYPE html>
-<html>
-<head>
-<style>
-  body {{
-    margin: 0;
-    padding: 0;
-    background: #0e1117;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-  }}
-  #controls {{
-    width: 100%;
-    padding: 6px 14px;
-    background: #1a1f2e;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    color: #6b9fcf;
-    box-sizing: border-box;
-  }}
-  #zoom-label {{ color: #4ecdc4; font-weight: 600; min-width: 55px; }}
-  #zoom-slider {{ flex: 1; accent-color: #00d4ff; }}
-  #reset-btn {{
-    background: #2d3a4f;
-    color: #c8d6e0;
-    border: none;
-    padding: 4px 14px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 12px;
-    font-family: inherit;
-  }}
-  #reset-btn:hover {{ background: #3a4a60; }}
-  canvas {{
-    cursor: grab;
-    display: block;
-  }}
-  canvas:active {{ cursor: grabbing; }}
-</style>
-</head>
-<body>
-<div id="controls">
-  <span>Zoom:</span>
-  <input id="zoom-slider" type="range" min="10" max="800" value="100" step="5">
-  <span id="zoom-label">100%</span>
-  <button id="reset-btn" onclick="resetView()">Fit</button>
-  <span style="margin-left:auto;color:#3d5068;">Scroll=zoom · Drag=pan · DblClick=fit</span>
-</div>
-<canvas id="c"></canvas>
-
-<script>
-const IMG_W = {img_w};
-const IMG_H = {img_h};
-const src = "data:image/png;base64,{b64}";
-
-const img = new Image();
-img.src = src;
-
-const canvas = document.getElementById('c');
-const ctx = canvas.getContext('2d');
-const slider = document.getElementById('zoom-slider');
-const zLabel = document.getElementById('zoom-label');
-
-let scale = 1.0;
-let ox = 0, oy = 0;
-let dragging = false;
-let lastX = 0, lastY = 0;
-
-function getCanvasSize() {{
-  const avail = window.innerWidth;
-  const h = 650;
-  return [avail, h];
-}}
-
-function fitScale() {{
-  const [cw, ch] = getCanvasSize();
-  return Math.min(cw / IMG_W, ch / IMG_H, 1.0);
-}}
-
-function resetView() {{
-  const [cw, ch] = getCanvasSize();
-  scale = fitScale();
-  ox = (cw - IMG_W * scale) / 2;
-  oy = (ch - IMG_H * scale) / 2;
-  slider.value = Math.round(scale * 100);
-  zLabel.textContent = Math.round(scale * 100) + '%';
-  draw();
-}}
-
-function draw() {{
-  const [cw, ch] = getCanvasSize();
-  canvas.width = cw;
-  canvas.height = ch;
-  ctx.clearRect(0, 0, cw, ch);
-  ctx.fillStyle = '#0e1117';
-  ctx.fillRect(0, 0, cw, ch);
-  ctx.drawImage(img, ox, oy, IMG_W * scale, IMG_H * scale);
-}}
-
-img.onload = () => resetView();
-
-canvas.addEventListener('wheel', (e) => {{
-  e.preventDefault();
-  const rect = canvas.getBoundingClientRect();
-  const mx = e.clientX - rect.left;
-  const my = e.clientY - rect.top;
-
-  const delta = e.deltaY < 0 ? 1.1 : 0.9;
-  const newScale = Math.min(8.0, Math.max(0.1, scale * delta));
-
-  ox = mx - (mx - ox) * (newScale / scale);
-  oy = my - (my - oy) * (newScale / scale);
-  scale = newScale;
-
-  slider.value = Math.round(scale * 100);
-  zLabel.textContent = Math.round(scale * 100) + '%';
-  draw();
-}}, {{ passive: false }});
-
-canvas.addEventListener('mousedown', (e) => {{
-  dragging = true;
-  lastX = e.clientX;
-  lastY = e.clientY;
-}});
-window.addEventListener('mousemove', (e) => {{
-  if (!dragging) return;
-  ox += e.clientX - lastX;
-  oy += e.clientY - lastY;
-  lastX = e.clientX;
-  lastY = e.clientY;
-  draw();
-}});
-window.addEventListener('mouseup', () => dragging = false);
-
-canvas.addEventListener('dblclick', () => resetView());
-
-slider.addEventListener('input', () => {{
-  const [cw, ch] = getCanvasSize();
-  const newScale = parseInt(slider.value) / 100;
-  ox = cw / 2 - (cw / 2 - ox) * (newScale / scale);
-  oy = ch / 2 - (ch / 2 - oy) * (newScale / scale);
-  scale = newScale;
-  zLabel.textContent = Math.round(scale * 100) + '%';
-  draw();
-}});
-
-window.addEventListener('resize', () => resetView());
-</script>
-</body>
-</html>
-"""
+                canvas_html = render_canvas_html(img_w, img_h, b64)
                 st.components.v1.html(canvas_html, height=700, scrolling=False)
 
     elif png_file is not None:
@@ -479,164 +528,7 @@ window.addEventListener('resize', () => resetView());
             if success:
                 b64 = base64.b64encode(buf.tobytes()).decode("utf-8")
                 img_h, img_w = img_bgra.shape[:2]
-
-                canvas_html = f"""
-<!DOCTYPE html>
-<html>
-<head>
-<style>
-  body {{
-    margin: 0;
-    padding: 0;
-    background: #0e1117;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-  }}
-  #controls {{
-    width: 100%;
-    padding: 6px 14px;
-    background: #1a1f2e;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    color: #6b9fcf;
-    box-sizing: border-box;
-  }}
-  #zoom-label {{ color: #4ecdc4; font-weight: 600; min-width: 55px; }}
-  #zoom-slider {{ flex: 1; accent-color: #00d4ff; }}
-  #reset-btn {{
-    background: #2d3a4f;
-    color: #c8d6e0;
-    border: none;
-    padding: 4px 14px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 12px;
-    font-family: inherit;
-  }}
-  #reset-btn:hover {{ background: #3a4a60; }}
-  canvas {{
-    cursor: grab;
-    display: block;
-  }}
-  canvas:active {{ cursor: grabbing; }}
-</style>
-</head>
-<body>
-<div id="controls">
-  <span>Zoom:</span>
-  <input id="zoom-slider" type="range" min="10" max="800" value="100" step="5">
-  <span id="zoom-label">100%</span>
-  <button id="reset-btn" onclick="resetView()">Fit</button>
-  <span style="margin-left:auto;color:#3d5068;">Scroll=zoom · Drag=pan · DblClick=fit</span>
-</div>
-<canvas id="c"></canvas>
-
-<script>
-const IMG_W = {img_w};
-const IMG_H = {img_h};
-const src = "data:image/png;base64,{b64}";
-
-const img = new Image();
-img.src = src;
-
-const canvas = document.getElementById('c');
-const ctx = canvas.getContext('2d');
-const slider = document.getElementById('zoom-slider');
-const zLabel = document.getElementById('zoom-label');
-
-let scale = 1.0;
-let ox = 0, oy = 0;
-let dragging = false;
-let lastX = 0, lastY = 0;
-
-function getCanvasSize() {{
-  const avail = window.innerWidth;
-  const h = 650;
-  return [avail, h];
-}}
-
-function fitScale() {{
-  const [cw, ch] = getCanvasSize();
-  return Math.min(cw / IMG_W, ch / IMG_H, 1.0);
-}}
-
-function resetView() {{
-  const [cw, ch] = getCanvasSize();
-  scale = fitScale();
-  ox = (cw - IMG_W * scale) / 2;
-  oy = (ch - IMG_H * scale) / 2;
-  slider.value = Math.round(scale * 100);
-  zLabel.textContent = Math.round(scale * 100) + '%';
-  draw();
-}}
-
-function draw() {{
-  const [cw, ch] = getCanvasSize();
-  canvas.width = cw;
-  canvas.height = ch;
-  ctx.clearRect(0, 0, cw, ch);
-  ctx.fillStyle = '#0e1117';
-  ctx.fillRect(0, 0, cw, ch);
-  ctx.drawImage(img, ox, oy, IMG_W * scale, IMG_H * scale);
-}}
-
-img.onload = () => resetView();
-
-canvas.addEventListener('wheel', (e) => {{
-  e.preventDefault();
-  const rect = canvas.getBoundingClientRect();
-  const mx = e.clientX - rect.left;
-  const my = e.clientY - rect.top;
-
-  const delta = e.deltaY < 0 ? 1.1 : 0.9;
-  const newScale = Math.min(8.0, Math.max(0.1, scale * delta));
-
-  ox = mx - (mx - ox) * (newScale / scale);
-  oy = my - (my - oy) * (newScale / scale);
-  scale = newScale;
-
-  slider.value = Math.round(scale * 100);
-  zLabel.textContent = Math.round(scale * 100) + '%';
-  draw();
-}}, {{ passive: false }});
-
-canvas.addEventListener('mousedown', (e) => {{
-  dragging = true;
-  lastX = e.clientX;
-  lastY = e.clientY;
-}});
-window.addEventListener('mousemove', (e) => {{
-  if (!dragging) return;
-  ox += e.clientX - lastX;
-  oy += e.clientY - lastY;
-  lastX = e.clientX;
-  lastY = e.clientY;
-  draw();
-}});
-window.addEventListener('mouseup', () => dragging = false);
-
-canvas.addEventListener('dblclick', () => resetView());
-
-slider.addEventListener('input', () => {{
-  const [cw, ch] = getCanvasSize();
-  const newScale = parseInt(slider.value) / 100;
-  ox = cw / 2 - (cw / 2 - ox) * (newScale / scale);
-  oy = ch / 2 - (ch / 2 - oy) * (newScale / scale);
-  scale = newScale;
-  zLabel.textContent = Math.round(scale * 100) + '%';
-  draw();
-}});
-
-window.addEventListener('resize', () => resetView());
-</script>
-</body>
-</html>
-"""
+                canvas_html = render_canvas_html(img_w, img_h, b64)
                 st.info("📄 Preview — Upload CSV file and click ▶ Run to process the image.")
                 st.components.v1.html(canvas_html, height=700, scrolling=False)
         else:
