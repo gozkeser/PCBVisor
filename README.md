@@ -78,26 +78,46 @@ This is the **primary data output** consumed by external automation scripts or s
 ```json
 {
     "transformation_matrix": [
-        [41.523456, -0.123456, 1250.5],
-        [0.123456, 41.523456, 980.25]
+        [
+            23.616594,
+            0.000903,
+            124.649067
+        ],
+        [
+            -0.000321,
+            -23.61525,
+            1541.513421
+        ]
     ],
     "origin_pixel": {
-        "x": 1251,
-        "y": 980
+        "x": 125,
+        "y": 1542
     },
     "layer": "TOP",
     "matched_fiducials": [
         {
             "designator": "FD1",
-            "x_px": 1458.12,
-            "y_px": 974.05,
-            "radius_px": 16.5
+            "x_px": 242.8,
+            "y_px": 419.8,
+            "radius_px": 9.38
         },
         {
             "designator": "FD2",
-            "x_px": 1250.5,
-            "y_px": 2185.32,
-            "radius_px": 16.3
+            "x_px": 360.79,
+            "y_px": 1364.38,
+            "radius_px": 9.42
+        },
+        {
+            "designator": "FD3",
+            "x_px": 2143.89,
+            "y_px": 1423.42,
+            "radius_px": 9.42
+        },
+        {
+            "designator": "FD4",
+            "x_px": 2238.36,
+            "y_px": 242.64,
+            "radius_px": 9.38
         }
     ]
 }
