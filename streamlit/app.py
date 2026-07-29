@@ -97,6 +97,21 @@ html, body, [class*="css"] {
 [data-testid="stDeployButton"] {
     display: none !important;
 }
+
+/* Glassmorphism for Dialog Modals */
+[data-testid="stModal"] {
+    background: rgba(15, 23, 42, 0.6) !important;
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+}
+[data-testid="stModal"] div[role="dialog"] {
+    background: rgba(30, 41, 59, 0.45) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    border-radius: 12px !important;
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37) !important;
+    backdrop-filter: blur(8px) !important;
+    -webkit-backdrop-filter: blur(8px) !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -112,6 +127,64 @@ if "last_png_name" not in st.session_state:
     st.session_state.last_png_name = None
 if "last_csv_name" not in st.session_state:
     st.session_state.last_csv_name = None
+if "show_status_dialog" not in st.session_state:
+    st.session_state.show_status_dialog = False
+
+# ─── Status Dialog ────────────────────────────────────────────────────────────
+
+# Create dialog decorator dynamically based on compatibility
+if hasattr(st, "dialog"):
+    dialog_decorator = st.dialog
+else:
+    dialog_decorator = st.experimental_dialog
+
+@dialog_decorator("Pipeline Execution Status")
+def show_status_dialog(state):
+    if state.success:
+        st.markdown(f"""
+        <div style="text-align: center; padding: 10px 0;">
+            <div style="font-size: 3rem; margin-bottom: 10px;">🎉</div>
+            <h3 style="color: #4ecdc4; margin: 0; font-weight: 600;">Success!</h3>
+            <p style="color: #c8d6e0; font-size: 0.95rem; margin-top: 10px;">
+                The pipeline executed all 22 steps successfully.
+            </p>
+            <p style="font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: #4ecdc4; background: rgba(78, 205, 196, 0.08); padding: 6px 12px; border-radius: 4px; display: inline-block;">
+                Duration: {state.total_duration_ms:.0f}ms
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        failed_step = state.step(state.failed_at)
+        step_label = failed_step.step_label if failed_step else "Unknown Step"
+        error_msg = failed_step.error if (failed_step and failed_step.error) else "Unknown error encountered"
+        st.markdown(f"""
+        <div style="padding: 10px 0;">
+            <div style="text-align: center;">
+                <div style="font-size: 3rem; margin-bottom: 10px;">🚨</div>
+                <h3 style="color: #ff6b6b; margin: 0; font-weight: 600;">Pipeline Failed</h3>
+            </div>
+            <div style="margin-top: 20px; background: rgba(255, 107, 107, 0.06); border: 1px solid rgba(255, 107, 107, 0.2); padding: 12px; border-radius: 8px;">
+                <div style="font-size: 0.85rem; color: #ff6b6b; font-weight: 600; margin-bottom: 4px;">
+                    Failed at Step {state.failed_at}:
+                </div>
+                <div style="font-size: 0.9rem; color: #FFFFFF; font-weight: 500; font-family: 'JetBrains Mono', monospace; margin-bottom: 8px;">
+                    {step_label}
+                </div>
+                <div style="font-size: 0.8rem; color: #c8d6e0; font-family: 'JetBrains Mono', monospace; white-space: pre-wrap; word-break: break-all; border-top: 1px solid rgba(255, 107, 107, 0.1); padding-top: 8px;">
+                    {error_msg}
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    if st.button("Close", use_container_width=True):
+        st.rerun()
+
+def render_html_component(html_content, height=700):
+    if hasattr(st, "iframe"):
+        st.iframe(html_content, height=height)
+    else:
+        st.components.v1.html(html_content, height=height, scrolling=False)
 
 # ─── Sidebar ─────────────────────────────────────────────────────────────────
 
@@ -262,6 +335,9 @@ if should_run and png_file and csv_file:
     steps_with_img = state.steps_with_images()
     if steps_with_img:
         st.session_state.selected_step_id = steps_with_img[-1].step_id
+
+    # Open the glassmorphic modal
+    st.session_state.show_status_dialog = True
 
 elif should_run and (not png_file or not csv_file):
     st.warning("⚠ Please upload both a PNG image and a CSV file before running.")
@@ -475,6 +551,11 @@ window.addEventListener('resize', () => resetView());
 
 state: PipelineState = st.session_state.pipeline_state
 
+# Render the dialog if triggered
+if st.session_state.show_status_dialog and state is not None:
+    st.session_state.show_status_dialog = False
+    show_status_dialog(state)
+
 tab1, tab2 = st.tabs(["🖼 Image Viewer & Statistics", "📋 Pipeline Steps & Execution Logs"])
 
 # ── TAB 1: Image Viewer & Statistics ─────────────────────────────────────────
@@ -515,7 +596,7 @@ with tab1:
                 b64 = base64.b64encode(buf.tobytes()).decode("utf-8")
                 img_h, img_w = img_to_encode.shape[:2]
                 canvas_html = render_canvas_html(img_w, img_h, b64)
-                st.components.v1.html(canvas_html, height=700, scrolling=False)
+                render_html_component(canvas_html, height=700)
 
     elif png_file is not None:
         # Show raw uploaded PNG as preview
@@ -530,7 +611,7 @@ with tab1:
                 img_h, img_w = img_bgra.shape[:2]
                 canvas_html = render_canvas_html(img_w, img_h, b64)
                 st.info("📄 Preview — Upload CSV file and click ▶ Run to process the image.")
-                st.components.v1.html(canvas_html, height=700, scrolling=False)
+                render_html_component(canvas_html, height=700)
         else:
             st.error("Could not decode uploaded PNG file.")
     else:
@@ -700,4 +781,3 @@ with tab2:
                         f'monospace;font-size:0.80rem;line-height:1.6;white-space:pre-wrap;">{line}</div>'
                     )
                 st.markdown(log_html, unsafe_allow_html=True)
-
