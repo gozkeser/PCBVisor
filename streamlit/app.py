@@ -666,9 +666,10 @@ with tab1:
             return None
 
         with dl_cols[0]:
-            b = _img_to_bytes(13)
+            b = _img_to_bytes(4)
             if b:
-                st.download_button("⬇ Download Annotated PNG", b, "annotated.png", "image/png",
+                dl_png_name = png_file.name if png_file else (st.session_state.last_png_name or "expanded.png")
+                st.download_button("⬇ Download Expanded Image", b, dl_png_name, "image/png",
                                    use_container_width=True)
         with dl_cols[1]:
             s19 = state.step(19)
