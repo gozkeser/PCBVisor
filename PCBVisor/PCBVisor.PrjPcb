@@ -101,12 +101,12 @@ GenerateClassCluster=0
 DocumentUniqueId=
 
 [Parameter1]
-Name=PCB_REV
-Value=D01
-
-[Parameter2]
 Name=PCB_NO
 Value=PCBVisor001
+
+[Parameter2]
+Name=PCB_REV
+Value=D01
 
 [Configuration1]
 Name=Sources

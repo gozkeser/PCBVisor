@@ -1,1 +1,7 @@
 "Net","Name","X Coord","Y Coord","Side","Hole Size","Type"
+"RXD","1-1","58mm","44.5mm","Top","0mm","Surface mount"
+"SCK","3-1","58mm","35.5mm","Top","0mm","Surface mount"
+"SCK","4-1","58mm","30.5mm","Top","0mm","Surface mount"
+"TXD","2-1","58mm","40.5mm","Top","0mm","Surface mount"
+"AIN1","6-1","32.5mm","35mm","Bottom","0mm","Surface mount"
+"AIN0","5-1","70mm","35mm","Bottom","0mm","Surface mount"
